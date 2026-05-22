@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<ruleset name="NinjaPay for WooCommerce">
+  <description>WPCS-based coding standards for the NinjaPay WooCommerce plugin.</description>
+
+  <file>src/</file>
+  <file>ninjapay-woocommerce.php</file>
+
+  <exclude-pattern>vendor/*</exclude-pattern>
+  <exclude-pattern>tests/*</exclude-pattern>
+
+  <rule ref="WordPress">
+    <exclude name="WordPress.Files.FileName.NotHyphenatedLowercase" />
+    <exclude name="WordPress.Files.FileName.InvalidClassFileName" />
+  </rule>
+
+  <config name="testVersion" value="7.4-" />
+  <rule ref="PHPCompatibilityWP" />
+
+  <arg name="extensions" value="php" />
+  <arg name="colors" />
+  <arg value="ps" />
+</ruleset>
