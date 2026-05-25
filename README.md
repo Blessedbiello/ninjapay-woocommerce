@@ -10,6 +10,10 @@ checkout (redirect flow); your store receives webhook notifications
 on success/failure, and order status syncs automatically. Refunds
 work from the WC admin like any other gateway.
 
+> Part of the **[NinjaPay platform](https://github.com/Blessedbiello/ninjapay-v7)** —
+> the open monorepo with the API, on-chain router, hosted checkout, and
+> merchant dashboard this plugin integrates with.
+
 ## Status
 
 **v1 in development.** See [PLAN.md](./PLAN.md) for the build plan.
