@@ -9,7 +9,6 @@ declare( strict_types = 1 );
 
 namespace NinjaPay\WooCommerce;
 
-use NinjaPay\WooCommerce\Admin\SettingsPage;
 use NinjaPay\WooCommerce\Gateway\NinjapayGateway;
 use NinjaPay\WooCommerce\Webhook\Receiver;
 

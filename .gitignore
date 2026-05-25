@@ -46,3 +46,17 @@ wp-config.php
 # Note: If you wish to whitelist themes,
 # uncomment the next line
 #/wp-content/themes
+
+# Composer — dependencies are installed per-environment / bundled at
+# build time, never committed.
+/vendor/
+
+# Standalone phars (composer.phar, phpunit.phar) used in CI / dev.
+*.phar
+
+# PHPUnit
+.phpunit.result.cache
+
+# Build output (bin/build-zip.sh)
+/dist/
+/*.zip

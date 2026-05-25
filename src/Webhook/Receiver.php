@@ -68,20 +68,30 @@ final class Receiver {
 
 		$event_id = (string) $event['id'];
 
-		// Dedupe via WP transient.
+		// Dedupe via WP transient — skip if we've already processed this
+		// event. The marker is set AFTER successful dispatch (below) so a
+		// processing failure isn't deduped away on NinjaPay's retry.
 		$dedupe_key = 'ninjapay_webhook_' . md5( $event_id );
 		if ( false !== get_transient( $dedupe_key ) ) {
-			// Already processed — silent success.
 			self::respond( 200, [ 'received' => true, 'duplicate' => true ] );
 			return;
 		}
-		set_transient( $dedupe_key, '1', self::DEDUPE_TTL_SECONDS );
 
 		// Allow extensions to hook in before our dispatch.
 		do_action( 'ninjapay_webhook_received', $event );
 
-		// Per-type dispatch — handlers land in week 3 (EventHandlers.php).
-		// For now: respond 200 to acknowledge receipt.
+		// Map the event onto WooCommerce order state.
+		try {
+			EventHandlers::dispatch( $event );
+		} catch ( \Throwable $e ) {
+			// Do NOT set the dedupe marker — return 5xx so NinjaPay
+			// retries and we reprocess once the bug/transient issue clears.
+			Logger::log( 'webhook dispatch failed: ' . $e->getMessage(), 'error' );
+			self::respond( 500, [ 'error' => 'dispatch_failed' ] );
+			return;
+		}
+
+		set_transient( $dedupe_key, '1', self::DEDUPE_TTL_SECONDS );
 		self::respond( 200, [ 'received' => true ] );
 	}
 

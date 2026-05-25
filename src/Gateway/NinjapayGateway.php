@@ -123,7 +123,7 @@ final class NinjapayGateway extends WC_Payment_Gateway {
 			return [ 'result' => 'failure', 'message' => __( 'Order not found.', 'ninjapay-woocommerce' ) ];
 		}
 
-		$client = $this->client();
+		$client          = $this->client();
 		$idempotency_key = IdempotencyKey::from_order( $order );
 
 		$payload = apply_filters(
@@ -136,30 +136,125 @@ final class NinjapayGateway extends WC_Payment_Gateway {
 					'wc_order_id'  => (string) $order->get_id(),
 					'wc_order_key' => $order->get_order_key(),
 				],
-				'privacy_mode' => $this->get_option( 'privacy_mode', 'private' ),
-				'success_url'  => $this->get_return_url( $order ),
-				'cancel_url'   => wc_get_checkout_url(),
+				// camelCase + uppercase enum to match the /v1/payment_links
+				// request schema. The settlement mint is resolved
+				// server-side from (currency, cluster), so we send none.
+				'privacyMode' => 'public' === $this->get_option( 'privacy_mode', 'private' ) ? 'PUBLIC' : 'PRIVATE',
+				'successUrl'  => $this->get_return_url( $order ),
+				'cancelUrl'   => wc_get_checkout_url(),
 			],
 			$order
 		);
 
 		try {
-			$intent = $client->post( '/v1/payment_intents', $payload, $idempotency_key );
+			$response = $client->post( '/v1/payment_links', $payload, $idempotency_key );
 		} catch ( \Throwable $e ) {
-			Logger::log( 'intent create failed: ' . $e->getMessage(), 'error' );
+			Logger::log( 'payment link create failed: ' . $e->getMessage(), 'error' );
 			wc_add_notice( __( 'Could not initiate NinjaPay payment. Please try again.', 'ninjapay-woocommerce' ), 'error' );
 			return [ 'result' => 'failure' ];
 		}
 
-		$order->update_meta_data( '_ninjapay_intent_id', $intent['id'] ?? '' );
+		// The create response nests the link under `payment_link`.
+		$link       = isset( $response['payment_link'] ) && is_array( $response['payment_link'] )
+			? $response['payment_link']
+			: $response;
+		$hosted_url = isset( $link['hosted_url'] ) && is_string( $link['hosted_url'] ) ? $link['hosted_url'] : '';
+		if ( '' === $hosted_url ) {
+			Logger::log( 'payment link create returned no hosted_url', 'error' );
+			wc_add_notice( __( 'Could not initiate NinjaPay payment. Please try again.', 'ninjapay-woocommerce' ), 'error' );
+			return [ 'result' => 'failure' ];
+		}
+
+		// Store the link id. The settled PAYMENT INTENT id (what refunds
+		// reference) arrives later on the payment_intent.succeeded webhook.
+		if ( isset( $link['id'] ) && is_string( $link['id'] ) ) {
+			$order->update_meta_data( '_ninjapay_payment_link_id', $link['id'] );
+		}
 		$order->update_meta_data( '_ninjapay_status', 'pending' );
-		$order->update_status( 'pending', __( 'NinjaPay intent created. Awaiting payer settlement.', 'ninjapay-woocommerce' ) );
+		$order->update_status(
+			'pending',
+			__( 'NinjaPay payment link created. Redirecting payer to hosted checkout.', 'ninjapay-woocommerce' )
+		);
 		$order->save();
 
 		return [
 			'result'   => 'success',
-			'redirect' => (string) ( $intent['hosted_url'] ?? $this->get_return_url( $order ) ),
+			'redirect' => $hosted_url,
 		];
+	}
+
+	/**
+	 * Refund a settled NinjaPay payment. Calls `POST /v1/refunds` against
+	 * the payment intent recorded on the order by the success webhook.
+	 *
+	 * Returns true on a successful refund REQUEST (HTTP 201) so WC records
+	 * the refund; the on-chain settlement is confirmed asynchronously by
+	 * the `refund.succeeded` / `refund.failed` webhook, which annotates
+	 * the order.
+	 *
+	 * @inheritDoc
+	 *
+	 * @param int        $order_id WC order id.
+	 * @param float|null $amount   Amount to refund; null = full order total.
+	 * @param string     $reason   Merchant-supplied reason.
+	 * @return bool|\WP_Error
+	 */
+	public function process_refund( $order_id, $amount = null, $reason = '' ) {
+		$order = wc_get_order( $order_id );
+		if ( ! $order instanceof WC_Order ) {
+			return new \WP_Error( 'ninjapay_refund_no_order', __( 'Order not found.', 'ninjapay-woocommerce' ) );
+		}
+
+		$intent_id = (string) $order->get_meta( '_ninjapay_intent_id' );
+		if ( '' === $intent_id ) {
+			return new \WP_Error(
+				'ninjapay_refund_not_settled',
+				__( 'This order has no settled NinjaPay payment yet — refunds are possible only once the payment confirms.', 'ninjapay-woocommerce' )
+			);
+		}
+
+		$refund_amount = ( null === $amount ) ? (float) $order->get_total() : (float) $amount;
+		if ( $refund_amount <= 0 ) {
+			return new \WP_Error( 'ninjapay_refund_amount', __( 'Refund amount must be greater than zero.', 'ninjapay-woocommerce' ) );
+		}
+		$amount_str = wc_format_decimal( $refund_amount, wc_get_price_decimals() );
+
+		$payload = [
+			'paymentIntentId' => $intent_id,
+			'amount'          => $amount_str,
+			'reason'          => 'REQUESTED_BY_CUSTOMER',
+			'metadata'        => [ 'wc_order_id' => (string) $order->get_id() ],
+		];
+		if ( '' !== $reason ) {
+			$payload['description'] = $reason;
+		}
+
+		// Stable-ish key per (order, amount) guards against double-clicks;
+		// a deliberately different amount refunds as a distinct request.
+		$idempotency_key = sprintf( 'wc_refund_%d_%s_%s', $order->get_id(), $order->get_order_key(), $amount_str );
+
+		try {
+			$response = $this->client()->post( '/v1/refunds', $payload, $idempotency_key );
+		} catch ( \Throwable $e ) {
+			Logger::log( 'refund request failed: ' . $e->getMessage(), 'error' );
+			return new \WP_Error(
+				'ninjapay_refund_failed',
+				__( 'NinjaPay refund request failed: ', 'ninjapay-woocommerce' ) . $e->getMessage()
+			);
+		}
+
+		$refund_obj = isset( $response['refund'] ) && is_array( $response['refund'] ) ? $response['refund'] : $response;
+		$refund_id  = isset( $refund_obj['id'] ) && is_string( $refund_obj['id'] ) ? $refund_obj['id'] : '';
+		$order->add_order_note(
+			sprintf(
+				/* translators: 1: refunded amount, 2: NinjaPay refund id. */
+				__( 'NinjaPay refund requested: %1$s%2$s. On-chain settlement confirmed via webhook.', 'ninjapay-woocommerce' ),
+				$amount_str,
+				'' !== $refund_id ? ' (' . $refund_id . ')' : ''
+			)
+		);
+
+		return true;
 	}
 
 	/**
