@@ -70,8 +70,13 @@ The privacy comes from the Umbra Privacy SDK on Solana, not from this plugin. Th
 
 == Changelog ==
 
-= 0.1.0 (Unreleased) =
-* Initial release in development.
+= 0.1.0 =
+* WooCommerce payment gateway: hosted-checkout redirect, paying in USDC / USDT / SOL on Solana, privacy-by-default with opt-in PUBLIC mode.
+* Automatic order-status sync from signed webhooks (paid / failed), recording the on-chain settlement signature.
+* Full + partial refunds from the WC admin.
+* HMAC-SHA256 webhook verification with replay protection + idempotent processing.
+* Order admin panel with the NinjaPay intent id and a Solscan settlement link.
+* HPOS compatible. PHP 7.4–8.3, WooCommerce 7.x–9.x.
 
 == Upgrade Notice ==
 

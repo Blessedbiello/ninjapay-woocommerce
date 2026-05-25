@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace NinjaPay\WooCommerce;
 
+use NinjaPay\WooCommerce\Admin\OrderMetaDisplay;
 use NinjaPay\WooCommerce\Gateway\NinjapayGateway;
 use NinjaPay\WooCommerce\Webhook\Receiver;
 
@@ -29,6 +30,9 @@ final class Plugin {
 
 		// Register the webhook receiver on the `wc-api/ninjapay_webhook` URL.
 		add_action( 'woocommerce_api_ninjapay_webhook', [ Receiver::class, 'handle' ] );
+
+		// Show NinjaPay settlement metadata on the order admin screen.
+		OrderMetaDisplay::register();
 
 		// Load text domain for translations.
 		add_action(

@@ -39,35 +39,39 @@ add_action('ninjapay_webhook_received', function($event) {
 **Args:**
 - `$event` (array): the verified webhook payload (`{id, type, data, created_at}`)
 
-### `ninjapay_order_paid` (week 3+)
+### `ninjapay_order_paid`
 
-Fires after a WC order is flipped to `processing`/`completed` by a
-NinjaPay webhook.
+Fires after a WC order is marked paid (`payment_complete`) by a
+`payment_intent.succeeded` webhook. The settled intent id + on-chain
+attestation signature are also stored on the order as
+`_ninjapay_intent_id` and `_ninjapay_attestation_sig`.
 
 ```php
-add_action('ninjapay_order_paid', function($order, $attestation_sig) {
+add_action('ninjapay_order_paid', function($order, $event) {
+    $sig = $order->get_meta('_ninjapay_attestation_sig');
     // Trigger a fulfillment workflow
-    my_fulfillment_queue->enqueue($order, $attestation_sig);
+    my_fulfillment_queue->enqueue($order, $sig);
 }, 10, 2);
 ```
 
 **Args:**
 - `$order` (WC_Order): the order that just settled
-- `$attestation_sig` (string): the Solana transaction signature
+- `$event` (array): the full verified webhook event
 
-### `ninjapay_refund_succeeded` (week 4+)
+### `ninjapay_refund_succeeded`
 
-Fires after a refund settles on-chain (webhook confirmation).
+Fires when a `refund.succeeded` webhook confirms an on-chain refund
+settlement.
 
 ```php
-add_action('ninjapay_refund_succeeded', function($refund, $order) {
+add_action('ninjapay_refund_succeeded', function($order, $event) {
     // Send a custom refund-confirmation email
 }, 10, 2);
 ```
 
 **Args:**
-- `$refund` (WC_Order_Refund): the WC refund row
 - `$order` (WC_Order): the parent order
+- `$event` (array): the full verified webhook event
 
 ## Notes
 

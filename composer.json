@@ -30,8 +30,7 @@
   },
   "scripts": {
     "test": "phpunit --testsuite unit",
-    "test:integration": "phpunit --testsuite integration",
-    "test:all": "phpunit",
+    "test:integration": "phpunit -c phpunit-integration.xml",
     "phpcs": "phpcs --standard=phpcs.xml src/ ninjapay-woocommerce.php",
     "phpcbf": "phpcbf --standard=phpcs.xml src/ ninjapay-woocommerce.php",
     "lint": [
